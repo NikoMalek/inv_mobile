@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 void main() {
   runApp(const MyApp());
@@ -31,10 +33,8 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController(text: ApiClient.defaultEmail);
-  final _passwordController = TextEditingController(
-    text: ApiClient.defaultPassword,
-  );
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _api = ApiClient();
 
   bool _loading = false;
@@ -97,7 +97,7 @@ class _LoginPageState extends State<LoginPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Acceso rapido con credenciales fijas',
+                    'Iniciar sesión',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
@@ -327,6 +327,7 @@ class _InventoryPageState extends State<InventoryPage> {
         codigoBarras: product.codigoBarras,
         precio: double.tryParse(precioController.text) ?? product.precio,
         cantidad: int.tryParse(cantidadController.text) ?? product.cantidad,
+        imagen: product.imagen,
       );
 
       if (!mounted) return;
@@ -393,7 +394,7 @@ class _InventoryPageState extends State<InventoryPage> {
           final product = _products[index];
           return ListTile(
             title: Text(product.nombre),
-            leading: product.imagen.isNotEmpty
+            leading: product.imagen.isNotEmpty && (product.imagen.startsWith('http') || product.imagen.startsWith('https'))
                 ? Image.network(
                     product.imagen,
                     width: 48,
@@ -401,7 +402,15 @@ class _InventoryPageState extends State<InventoryPage> {
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => const Icon(Icons.image_not_supported),
                   )
-                : const Icon(Icons.inventory_2_outlined, size: 48),
+                : product.imagen.isNotEmpty && product.imagen.startsWith('data:image')
+                    ? Image.memory(
+                        base64Decode(product.imagen.split(',').last),
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.image_not_supported),
+                      )
+                    : const Icon(Icons.inventory_2_outlined, size: 48),
             subtitle: Text(
               'Codigo: ${product.codigoBarras} | Precio: ${product.precio} | Cantidad: ${product.cantidad}',
             ),
@@ -433,6 +442,10 @@ class _NewProductPageState extends State<NewProductPage> {
   final _precioController = TextEditingController();
   final _cantidadController = TextEditingController();
 
+  final ImagePicker _picker = ImagePicker();
+  File? _imagenFile;
+  String _imagenBase64 = '';
+
   bool _saving = false;
 
   @override
@@ -443,6 +456,48 @@ class _NewProductPageState extends State<NewProductPage> {
     _precioController.dispose();
     _cantidadController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Tomar foto'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Elegir de galería'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    final pickedFile = await _picker.pickImage(source: source);
+    if (pickedFile == null) return;
+
+    final bytes = await pickedFile.readAsBytes();
+
+    final mimeType = pickedFile.path.toLowerCase().endsWith('.png')
+        ? 'image/png'
+        : pickedFile.path.toLowerCase().endsWith('.jpg') ||
+                pickedFile.path.toLowerCase().endsWith('.jpeg')
+            ? 'image/jpeg'
+            : 'image/webp';
+
+    setState(() {
+      _imagenFile = File(pickedFile.path);
+      _imagenBase64 = 'data:$mimeType;base64,${base64Encode(bytes)}';
+    });
   }
 
   Future<void> _save() async {
@@ -461,6 +516,7 @@ class _NewProductPageState extends State<NewProductPage> {
         codigoBarras: _codigoController.text.trim(),
         precio: double.parse(_precioController.text),
         cantidad: int.parse(_cantidadController.text),
+        imagen: _imagenBase64,
       );
 
       if (!mounted) return;
@@ -554,6 +610,21 @@ class _NewProductPageState extends State<NewProductPage> {
                   ? 'Cantidad invalida'
                   : null,
             ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : _pickImage,
+              icon: const Icon(Icons.image),
+              label: const Text('Añadir imagen'),
+            ),
+              if (_imagenFile != null) ...[
+                const SizedBox(height: 12),
+                Image.file(
+                  _imagenFile!,
+                  height: 120,
+                  fit: BoxFit.cover,
+                ),
+              ],
+              
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _saving ? null : _save,
@@ -687,13 +758,14 @@ class ApiClient {
     required String codigoBarras,
     required double precio,
     required int cantidad,
+    required String imagen,
   }) async {
     _ensureSession();
 
     final payload = {
       'nombre': nombre,
       'description': description,
-      'imagen': '',
+      'imagen': imagen,
       'codigoBarras': codigoBarras,
       'id_empresa': _idEmpresa,
       'precio': precio,
