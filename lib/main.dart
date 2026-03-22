@@ -472,7 +472,7 @@ class _NewProductPageState extends State<NewProductPage> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
-              title: const Text('Elegir de galería'),
+              title: const Text('Elegir de galeria'),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
           ],
@@ -482,10 +482,23 @@ class _NewProductPageState extends State<NewProductPage> {
 
     if (source == null) return;
 
-    final pickedFile = await _picker.pickImage(source: source);
-    if (pickedFile == null) return;
+    int quality = 40;
+    XFile? pickedFile;
+    List<int> bytes = [];
 
-    final bytes = await pickedFile.readAsBytes();
+    do {
+      pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: quality,
+        maxWidth: 600,
+      );
+
+      if (pickedFile == null) return;
+
+      bytes = await pickedFile.readAsBytes();
+
+      quality -= 10; // Reducir calidad en pasos de 10 hasta que pese menos de 100 KB
+    } while (bytes.length > 100000 && quality > 5); // 100 KB
 
     final mimeType = pickedFile.path.toLowerCase().endsWith('.png')
         ? 'image/png'
@@ -495,9 +508,10 @@ class _NewProductPageState extends State<NewProductPage> {
             : 'image/webp';
 
     setState(() {
-      _imagenFile = File(pickedFile.path);
+      _imagenFile = File(pickedFile!.path);
       _imagenBase64 = 'data:$mimeType;base64,${base64Encode(bytes)}';
     });
+
   }
 
   Future<void> _save() async {
